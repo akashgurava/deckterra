@@ -4,6 +4,7 @@ extern crate serde;
 extern crate pretty_env_logger;
 
 mod decks;
+mod models;
 mod utils;
 
 use std::time::Instant;

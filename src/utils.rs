@@ -86,7 +86,7 @@ pub async fn fetch<T: DeserializeOwned>(request: RequestBuilder, identifier: usi
 pub async fn fetch_multiple<T: DeserializeOwned>(requests: Vec<RequestBuilder>) -> Vec<Option<T>> {
     let queries = tokio::stream::iter(requests);
     let dur = Duration::from_millis(250); // 1 request per 250ms
-    let max_concurrent_req = 8usize;
+    let max_concurrent_req = 6usize;
 
     let data = tokio::time::throttle(dur, queries)
         .enumerate()
