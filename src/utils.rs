@@ -1,73 +1,105 @@
-use std::error::Error;
-use std::time::Duration;
+use std::{cmp::Ordering, time::Duration, time::Instant};
 
 use futures::stream::StreamExt;
-
-use log::trace;
-use reqwest::{Client, Method};
+use log::{debug, trace};
+use reqwest::{Client, Method, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::delay_for;
 
 const ENDPOINT_HOME: &str = "https://lor.mobalytics.gg/api/v2/";
 
-pub async fn fetch<Q: Serialize, R: DeserializeOwned>(
+/// chain two orderings: the first one gets more priority
+pub fn chain_ordering(o1: Ordering, o2: Ordering) -> Ordering {
+    match o1 {
+        Ordering::Equal => o2,
+        _ => o1,
+    }
+}
+
+pub fn build_request<Q: Serialize>(
     client: &Client,
     method: &str,
     route: &str,
     query: Option<Q>,
-) -> Option<R> {
-    let url = &format!("{}{}", ENDPOINT_HOME, route);
+) -> RequestBuilder {
+    let url = Url::parse(ENDPOINT_HOME).unwrap().join(route).unwrap();
     let mut request = client.request(Method::from_bytes(method.as_bytes()).unwrap(), url);
     if query.is_some() {
         request = request.query(&query.unwrap());
     }
-    let mut data: Option<R> = None;
+    let request = request;
+    request
+}
 
-    let mut try_count: u8 = 1;
-    while try_count < 4 {
-        let req_clone = request.try_clone().unwrap();
-        let response = req_clone.send().await;
+pub async fn fetch<T: DeserializeOwned>(request: RequestBuilder, identifier: usize) -> Option<T> {
+    trace!("{} - Request Start", identifier);
+    let start = Instant::now();
+
+    let mut num_try: u8 = 1;
+    // Max retries
+    while num_try < 4 {
+        // Clone Request before
+        let request = request.try_clone().unwrap();
+        let response = request.send().await;
         if response.is_ok() {
-            let req_data = response.unwrap().json::<R>().await;
-            if req_data.is_ok() {
-                data.replace(req_data.unwrap());
-                break;
+            let response = response.unwrap().json::<T>().await;
+            if response.is_ok() {
+                trace!(
+                    "{}th - Request Complete in {}th try in {} secs",
+                    identifier,
+                    num_try,
+                    start.elapsed().as_secs()
+                );
+                return Some(response.unwrap());
             } else {
                 // Some error during decode
-                let req_err: reqwest::Error = req_data.err().unwrap();
-                let req_err = req_err.source().unwrap();
                 trace!(
-                    "{}th Try: Unable to convert response data: {}",
-                    try_count,
-                    req_err
+                    "{}th - Request - {}th Try - Unable to convert response data - {}",
+                    identifier,
+                    num_try,
+                    response.err().unwrap()
                 );
             }
         } else {
+            trace!(
+                "{}th - Request - {}th Try - Request Failed - {}",
+                identifier,
+                num_try,
+                response.err().unwrap()
+            );
             trace!("Request failed.");
         }
         delay_for(Duration::from_millis(1500)).await;
-        try_count += 1;
+        num_try += 1;
     }
+    debug!(
+        "{}th - Request Failed after {} tries. Time spent - {} secs",
+        identifier,
+        num_try,
+        start.elapsed().as_secs()
+    );
+    None
+
     // debug!("request with query {:?} failed", query.unwrap());
-    data
 }
 
-pub async fn fetch_multiple<Q: Serialize, R: DeserializeOwned>(
-    client: &Client,
-    method: &str,
-    route: &str,
-    queries: Vec<Q>,
-) -> Vec<Option<R>> {
-    let queries = tokio::stream::iter(queries);
+pub async fn fetch_multiple<T: DeserializeOwned>(requests: Vec<RequestBuilder>) -> Vec<Option<T>> {
+    let queries = tokio::stream::iter(requests);
     let dur = Duration::from_millis(250); // 1 request per 250ms
+    let max_concurrent_req = 8usize;
 
-    let data: Vec<Option<R>> = tokio::time::throttle(dur, queries)
-        .map(|query| async {
-            crate::utils::fetch::<Q, R>(client, method, route, Some(query)).await
+    let data = tokio::time::throttle(dur, queries)
+        .enumerate()
+        .map(|(mut i, request)| async move {
+            i += 1;
+            if i > max_concurrent_req {
+                delay_for(Duration::from_secs(8)).await;
+            }
+            crate::utils::fetch::<T>(request, i).await
         })
         // Send max of 5 requests at a time
-        .buffered(5)
-        .collect()
+        .buffered(max_concurrent_req)
+        .collect::<Vec<_>>()
         .await;
     data
 }

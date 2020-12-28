@@ -93,9 +93,7 @@ dependencies = [
  "pretty_env_logger",
  "reqwest",
  "serde",
- "serde_repr",
  "tokio",
- "tryhard",
 ]
 
 [[package]]
@@ -942,17 +940,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_repr"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dc6b7951b17b051f3210b063f12cc17320e2fe30ae05b0fe2a3abb068551c76"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "serde_urlencoded"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1149,17 +1136,6 @@ name = "try-lock"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
-
-[[package]]
-name = "tryhard"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39209adfb74aff27f7b83e45b95261cd0146b86228aa49616d9584f35d35575a"
-dependencies = [
- "futures",
- "pin-project 1.0.2",
- "tokio",
-]
 
 [[package]]
 name = "unicase"

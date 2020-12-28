@@ -12,6 +12,4 @@ log = "0.4.11"
 pretty_env_logger = "0.4.0"
 reqwest = {version = "0.10", features = ["json"]}
 serde = {version = "1.0", features = ["derive"]}
-serde_repr = "0.1.6"
 tokio = {version = "0.2.5", features = ["full"]}
-tryhard = {version = "0.2.0", features = ["tokio-02"], default_features = false}
