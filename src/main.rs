@@ -7,16 +7,26 @@ mod decks;
 mod models;
 mod utils;
 
-use std::time::Instant;
+use decks::get_decks;
+use hyper::{client::HttpConnector, Body, Client};
+use hyper_rustls::HttpsConnector;
+use log::info;
+use tokio::time::Instant;
 
-use log::debug;
-use reqwest::Client;
+pub type HyperClient = Client<HttpsConnector<HttpConnector>, Body>;
 
 #[tokio::main]
 async fn main() {
-    let app_start = Instant::now();
     pretty_env_logger::init();
-    let client = Client::new();
-    crate::decks::get_decks(&client, None, Some(50000), None).await;
-    debug!("App completed in {} secs", app_start.elapsed().as_secs());
+    let app_start = Instant::now();
+
+    info!("App Started!");
+    // Build Hyper Client with HTTPS support
+    let _app_start = Instant::now();
+    let https = HttpsConnector::with_native_roots();
+    let client: HyperClient = Client::builder().build(https);
+
+    get_decks(&client, Some(20000), None, None).await;
+
+    info!("App completed in {} secs", app_start.elapsed().as_secs());
 }

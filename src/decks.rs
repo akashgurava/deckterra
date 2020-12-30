@@ -1,53 +1,146 @@
-use log::trace;
-use reqwest::{Client, Method};
+use http::uri::Uri;
+use log::info;
+use serde_qs;
 
-use crate::models::*;
+use crate::{models::DeckData, utils::fetch_multiple};
 
 // Constants
 const MAX_DECKS: u32 = 125_000;
 
+const ENDPOINT_HOME: &str = "https://lor.mobalytics.gg/api/v2/";
 const ENDPOINT_DECKS_LIBRARY: &str = "decks/library";
 
-const DECK_FETCH_COUNT: u32 = 5000;
+const DEFAULT_DECK_FETCH_COUNT: u32 = 5000;
 const DECK_DIV_COUNT: u32 = 4000;
 
-pub async fn get_decks(
-    client: &Client,
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum DeckCategory {
+    Community,
+    Budget,
+    Featured,
+}
+
+impl Default for DeckCategory {
+    fn default() -> Self {
+        DeckCategory::Community
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum DeckSort {
+    RecentlyUpdated,
+    Hot,
+    Popularity,
+}
+
+impl Default for DeckSort {
+    fn default() -> Self {
+        DeckSort::RecentlyUpdated
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+pub struct DeckUri {
+    sort_by: Option<DeckSort>,
+    from: Option<u32>,
+    count: u32,
     category: Option<DeckCategory>,
+}
+
+impl DeckUri {
+    #[allow(dead_code)]
+    fn new(count: Option<u32>) -> Self {
+        DeckUri {
+            count: count.unwrap_or_else(|| DEFAULT_DECK_FETCH_COUNT),
+            ..DeckUri::default()
+        }
+    }
+
+    #[allow(dead_code)]
+    fn create(
+        sort_by: Option<DeckSort>,
+        from: Option<u32>,
+        count: Option<u32>,
+        category: Option<DeckCategory>,
+    ) -> Self {
+        DeckUri {
+            sort_by,
+            from,
+            count: count.unwrap_or_else(|| DEFAULT_DECK_FETCH_COUNT),
+            category,
+        }
+    }
+}
+
+impl Default for DeckUri {
+    fn default() -> Self {
+        DeckUri {
+            sort_by: None,
+            from: None,
+            count: 100,
+            category: None,
+        }
+    }
+}
+
+impl ToString for DeckUri {
+    fn to_string(&self) -> String {
+        let query = serde_qs::to_string(&self).unwrap();
+        format!("{}{}?{}", ENDPOINT_HOME, ENDPOINT_DECKS_LIBRARY, query)
+    }
+}
+
+// Todo: Change this to TryFrom
+impl From<DeckUri> for Uri {
+    fn from(value: DeckUri) -> Self {
+        value.to_string().parse().unwrap()
+    }
+}
+
+#[allow(unused_variables)]
+pub async fn get_decks(
+    client: &crate::HyperClient,
     total_decks: Option<u32>,
     sort_by: Option<DeckSort>,
+    category: Option<DeckCategory>,
 ) {
-    let category = category.unwrap_or_default();
     // We request 20% more decks
-    let total_decks = ((total_decks.unwrap_or_else(|| MAX_DECKS)) as f64 * 1.2).ceil() as u64;
-    let sort_by = sort_by.unwrap_or_default();
+    let total_decks = ((total_decks.unwrap_or_else(|| MAX_DECKS)) as f64 * 1.2).ceil() as u32;
     let num_requests = (total_decks as f64 / DECK_DIV_COUNT as f64).ceil() as u32;
 
-    let count = (total_decks as f64 / num_requests as f64).ceil() as u32;
-    // dbg!(num_requests);
-    // dbg!(count);
+    let category = Some(category.unwrap_or_default());
+    let sort_by = Some(sort_by.unwrap_or_default());
 
-    let requests = (0..num_requests)
-        .map(|i| DeckQuery {
-            sort_by,
-            from: i * count,
-            count: DECK_FETCH_COUNT,
-            category,
-        })
-        .map(|query| {
-            crate::utils::build_request(
-                client,
-                Method::GET.as_str(),
-                ENDPOINT_DECKS_LIBRARY,
-                Some(query),
-            )
+    let request_uris = (0..num_requests)
+        .map(|i| {
+            let count = if i < num_requests - 1 {
+                DEFAULT_DECK_FETCH_COUNT
+            } else {
+                let rem = total_decks % DECK_DIV_COUNT;
+                if rem == 0 {
+                    DEFAULT_DECK_FETCH_COUNT
+                } else {
+                    rem
+                }
+            };
+            Uri::from(DeckUri::create(
+                sort_by,
+                Some(i * DECK_DIV_COUNT),
+                Some(count),
+                category,
+            ))
         })
         .collect::<Vec<_>>();
 
-    trace!("Sending {} requests.", num_requests);
-
+    info!(
+        "Sending {} requests for {} decks.",
+        num_requests, total_decks
+    );
     let data = {
-        let mut data = crate::utils::fetch_multiple::<DeckData>(requests)
+        let mut data = fetch_multiple::<DeckData>(client, request_uris)
             .await
             .into_iter()
             .map(|x: Option<DeckData>| x.unwrap_or_default())
@@ -60,5 +153,34 @@ pub async fn get_decks(
         data
     };
     // dbg!(data);
-    println!("{}", data.len());
+    info!("Recieved {} decks.", data.len());
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::{DeckCategory, DeckSort, DeckUri, Uri};
+
+    #[test]
+    fn test_build_uri_from_new() {
+        let deck = DeckUri::new(Some(1000));
+        assert_eq!(
+            Uri::from(deck),
+            "https://lor.mobalytics.gg/api/v2/decks/library?count=1000"
+        )
+    }
+
+    #[test]
+    fn test_build_uri_from_all() {
+        let deck = DeckUri::create(
+            Some(DeckSort::Hot),
+            Some(1000),
+            Some(4000),
+            Some(DeckCategory::Community),
+        );
+        assert_eq!(
+            Uri::from(deck),
+            "https://lor.mobalytics.gg/api/v2/decks/library?sortBy=hot&from=1000&count=4000&category=COMMUNITY"
+        )
+    }
 }
