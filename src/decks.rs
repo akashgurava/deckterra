@@ -1,4 +1,4 @@
-use log::trace;
+use log::info;
 use reqwest::{Client, Method};
 
 use crate::models::*;
@@ -19,20 +19,31 @@ pub async fn get_decks(
 ) {
     let category = category.unwrap_or_default();
     // We request 20% more decks
-    let total_decks = ((total_decks.unwrap_or_else(|| MAX_DECKS)) as f64 * 1.2).ceil() as u64;
+    let total_decks = ((total_decks.unwrap_or_else(|| MAX_DECKS)) as f64 * 1.2).ceil() as u32;
     let sort_by = sort_by.unwrap_or_default();
     let num_requests = (total_decks as f64 / DECK_DIV_COUNT as f64).ceil() as u32;
 
-    let count = (total_decks as f64 / num_requests as f64).ceil() as u32;
     // dbg!(num_requests);
     // dbg!(count);
 
     let requests = (0..num_requests)
-        .map(|i| DeckQuery {
-            sort_by,
-            from: i * count,
-            count: DECK_FETCH_COUNT,
-            category,
+        .map(|i| {
+            let count = if i < num_requests - 1 {
+                DECK_FETCH_COUNT
+            } else {
+                let rem = total_decks % DECK_DIV_COUNT;
+                if rem == 0 {
+                    DECK_FETCH_COUNT
+                } else {
+                    rem
+                }
+            };
+            DeckQuery {
+                sort_by,
+                from: i * DECK_DIV_COUNT,
+                count,
+                category,
+            }
         })
         .map(|query| {
             crate::utils::build_request(
@@ -44,8 +55,10 @@ pub async fn get_decks(
         })
         .collect::<Vec<_>>();
 
-    trace!("Sending {} requests.", num_requests);
-
+    info!(
+        "Sending {} requests for {} decks.",
+        num_requests, total_decks
+    );
     let data = {
         let mut data = crate::utils::fetch_multiple::<DeckData>(requests)
             .await
@@ -60,5 +73,5 @@ pub async fn get_decks(
         data
     };
     // dbg!(data);
-    println!("{}", data.len());
+    info!("Recieved {} decks.", data.len());
 }

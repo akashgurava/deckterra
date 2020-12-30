@@ -1,7 +1,7 @@
 use std::{cmp::Ordering, time::Duration, time::Instant};
 
 use futures::stream::StreamExt;
-use log::{debug, trace};
+use log::{debug, error, trace};
 use reqwest::{Client, Method, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::delay_for;
@@ -41,11 +41,17 @@ pub async fn fetch<T: DeserializeOwned>(request: RequestBuilder, identifier: usi
         // Clone Request before
         let request = request.try_clone().unwrap();
         let response = request.send().await;
+        trace!(
+            "{}th request - {}th try - Recieved response: {}",
+            identifier,
+            num_try,
+            start.elapsed().as_secs()
+        );
         if response.is_ok() {
             let response = response.unwrap().json::<T>().await;
             if response.is_ok() {
-                trace!(
-                    "{}th - Request Complete in {}th try in {} secs",
+                debug!(
+                    "{}th request - {}th try - Completed in {} secs",
                     identifier,
                     num_try,
                     start.elapsed().as_secs()
@@ -53,30 +59,36 @@ pub async fn fetch<T: DeserializeOwned>(request: RequestBuilder, identifier: usi
                 return Some(response.unwrap());
             } else {
                 // Some error during decode
-                trace!(
-                    "{}th - Request - {}th Try - Unable to convert response data - {}",
+                let err = response.err().unwrap();
+                debug!(
+                    "{}th request - {}th try - Convert to struct failed: {}",
                     identifier,
                     num_try,
-                    response.err().unwrap()
+                    err.to_string()
                 );
             }
         } else {
-            trace!(
-                "{}th - Request - {}th Try - Request Failed - {}",
+            let err = response.err().unwrap();
+            debug!(
+                "{}th request - {}th try - Sending Request Failed: {}",
                 identifier,
                 num_try,
-                response.err().unwrap()
+                err.to_string()
             );
-            trace!("Request failed.");
         }
         delay_for(Duration::from_millis(1500)).await;
         num_try += 1;
     }
-    debug!(
-        "{}th - Request Failed after {} tries. Time spent - {} secs",
+    error!(
+        "{}th request - Failed - Uri: {}",
         identifier,
-        num_try,
-        start.elapsed().as_secs()
+        request
+            .try_clone()
+            .unwrap()
+            .build()
+            .unwrap()
+            .url()
+            .to_string()
     );
     None
 
