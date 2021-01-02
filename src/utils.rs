@@ -1,14 +1,23 @@
-use std::{cmp::Ordering, time::Duration};
+use std::{cmp::Ordering, fs::OpenOptions, io::BufWriter, time::Duration};
 
 use futures_util::StreamExt;
-// use futures::StreamExt;
-use hyper::{Body, Request, Uri};
-use log::{debug, error, info, trace};
-use serde::de::DeserializeOwned;
+use hyper::{client::HttpConnector, Body, Client, Request, Uri};
+use hyper_rustls::HttpsConnector;
+use log::{error, info, trace, warn};
+use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::{sleep, Instant};
 use tokio_stream as stream;
 
-use crate::HyperClient;
+type HyperClient = Client<HttpsConnector<HttpConnector>, Body>;
+
+lazy_static! {
+    // Build Hyper Client with HTTPS support
+    static ref CLIENT: HyperClient = {
+        let _app_start = Instant::now();
+        let https = HttpsConnector::with_native_roots();
+        Client::builder().build(https)
+    };
+}
 
 /// chain two orderings: the first one gets more priority
 pub fn chain_ordering(o1: Ordering, o2: Ordering) -> Ordering {
@@ -18,11 +27,7 @@ pub fn chain_ordering(o1: Ordering, o2: Ordering) -> Ordering {
     }
 }
 
-pub async fn fetch<T: DeserializeOwned>(
-    client: &HyperClient,
-    uri: Uri,
-    identifier: usize,
-) -> Option<T> {
+pub async fn fetch<T: DeserializeOwned>(uri: Uri, identifier: usize) -> Option<T> {
     trace!("{}th request - Start.", identifier);
     let start = Instant::now();
 
@@ -33,7 +38,7 @@ pub async fn fetch<T: DeserializeOwned>(
             .uri(uri.clone())
             .body(Body::empty())
             .unwrap();
-        let response = client.request(request).await;
+        let response = CLIENT.request(request).await;
         trace!(
             "{}th request - {}th try - Recieved response: {}",
             identifier,
@@ -55,7 +60,7 @@ pub async fn fetch<T: DeserializeOwned>(
                     return Some(data.unwrap());
                 } else {
                     let err = data.err().unwrap();
-                    debug!(
+                    warn!(
                         "{}th request - {}th try - Convert to struct failed: {}",
                         identifier,
                         num_try,
@@ -64,7 +69,7 @@ pub async fn fetch<T: DeserializeOwned>(
                 }
             } else {
                 let err = body.err().unwrap();
-                debug!(
+                warn!(
                     "{}th request - {}th try - Parsing response failed: {}",
                     identifier,
                     num_try,
@@ -73,7 +78,7 @@ pub async fn fetch<T: DeserializeOwned>(
             }
         } else {
             let err = response.err().unwrap();
-            debug!(
+            warn!(
                 "{}th request - {}th try - Sending Request Failed: {}",
                 identifier,
                 num_try,
@@ -91,10 +96,7 @@ pub async fn fetch<T: DeserializeOwned>(
     None
 }
 
-pub async fn fetch_multiple<T: DeserializeOwned>(
-    client: &HyperClient,
-    uris: Vec<Uri>,
-) -> Vec<Option<T>> {
+pub async fn fetch_multiple<T: DeserializeOwned>(uris: Vec<Uri>) -> Vec<Option<T>> {
     let uris = stream::iter(uris);
     let dur = Duration::from_millis(250); // 1 request per 250ms
     let max_concurrent_req = 6usize;
@@ -107,11 +109,27 @@ pub async fn fetch_multiple<T: DeserializeOwned>(
                 trace!("{}th request - Sleeping for 8 secs", i);
                 sleep(Duration::from_secs(8)).await;
             }
-            fetch::<T>(client, uri, i).await
+            fetch::<T>(uri, i).await
         })
         // Send max of 5 requests at a time
         .buffered(max_concurrent_req)
         .collect::<Vec<_>>()
         .await;
     data
+}
+
+pub fn write_file<T>(path: &str, data: &T)
+where
+    T: ?Sized + Serialize,
+{
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .truncate(true)
+        .create(true)
+        .open(path)
+        .unwrap();
+    let mut file = BufWriter::new(file);
+
+    serde_json::to_writer_pretty(&mut file, &data).unwrap();
 }

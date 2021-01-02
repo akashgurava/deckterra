@@ -1,8 +1,11 @@
-use http::uri::Uri;
+use hyper::Uri;
 use log::info;
 use serde_qs;
 
-use crate::{models::DeckData, utils::fetch_multiple};
+use crate::{
+    models::{Deck, DeckData},
+    utils::{fetch_multiple, write_file},
+};
 
 // Constants
 const MAX_DECKS: u32 = 125_000;
@@ -102,11 +105,10 @@ impl From<DeckUri> for Uri {
 
 #[allow(unused_variables)]
 pub async fn get_decks(
-    client: &crate::HyperClient,
     total_decks: Option<u32>,
     sort_by: Option<DeckSort>,
     category: Option<DeckCategory>,
-) {
+) -> Vec<Deck> {
     // We request 20% more decks
     let total_decks = ((total_decks.unwrap_or_else(|| MAX_DECKS)) as f64 * 1.2).ceil() as u32;
     let num_requests = (total_decks as f64 / DECK_DIV_COUNT as f64).ceil() as u32;
@@ -140,7 +142,7 @@ pub async fn get_decks(
         num_requests, total_decks
     );
     let data = {
-        let mut data = fetch_multiple::<DeckData>(client, request_uris)
+        let mut data = fetch_multiple::<DeckData>(request_uris)
             .await
             .into_iter()
             .map(|x: Option<DeckData>| x.unwrap_or_default())
@@ -154,6 +156,25 @@ pub async fn get_decks(
     };
     // dbg!(data);
     info!("Recieved {} decks.", data.len());
+    data
+}
+
+pub async fn save_decks(
+    total_decks: Option<u32>,
+    sort_by: Option<DeckSort>,
+    category: Option<DeckCategory>,
+) {
+    let decks = get_decks(total_decks, sort_by, category).await;
+    write_file("decks.json", &decks);
+    info!("Saved deck data at {}.", "decks.json");
+
+    let cards = decks
+        .iter()
+        .map(|deck| deck.get_deck_cards())
+        .flatten()
+        .collect::<Vec<_>>();
+    write_file("cards.json", &cards);
+    info!("Saved card data at {}.", "cards.json");
 }
 
 #[cfg(test)]
