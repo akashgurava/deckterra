@@ -7,6 +7,7 @@ version = "0.1.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+chrono = {version = "0.4.19", features = ["serde"]}
 futures-util = "*"
 hyper = {version = "0.14", features = ["client", "http2"]}
 hyper-rustls = "0.22"

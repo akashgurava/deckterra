@@ -1,5 +1,6 @@
 use std::{cmp::Ordering, collections::HashMap};
 
+use chrono::{serde::ts_milliseconds, DateTime, Utc};
 use lordeckcodes::encoder::deck_from_code;
 
 use crate::utils::chain_ordering;
@@ -23,16 +24,18 @@ lazy_static! {
 #[serde(rename_all = "camelCase")]
 pub struct Deck {
     uid: String,
+    #[serde(rename(deserialize = "exportUID"))]
+    deck_code: String,
     title: String,
     description: String,
-    #[serde(rename = "exportUID")]
-    export: String,
-    mode: String,
-    #[serde(rename = "playStyle")]
-    playstyle: String,
-    created_at: u64,
-    changed_at: u64,
     rating: i32,
+    mode: String,
+    #[serde(rename(deserialize = "playStyle"))]
+    playstyle: String,
+    #[serde(with = "ts_milliseconds")]
+    created_at: DateTime<Utc>,
+    #[serde(with = "ts_milliseconds")]
+    changed_at: DateTime<Utc>,
     is_private: bool,
     is_draft: bool,
     is_riot: bool,
@@ -42,13 +45,16 @@ impl Eq for Deck {}
 
 impl PartialEq for Deck {
     fn eq(&self, other: &Self) -> bool {
-        (self.uid == other.uid) & (self.export == other.export)
+        (self.uid == other.uid) & (self.deck_code == other.deck_code)
     }
 }
 
 impl Ord for Deck {
     fn cmp(&self, other: &Self) -> Ordering {
-        chain_ordering(self.uid.cmp(&other.uid), self.export.cmp(&other.export))
+        chain_ordering(
+            self.uid.cmp(&other.uid),
+            self.deck_code.cmp(&other.deck_code),
+        )
     }
 }
 
@@ -61,7 +67,7 @@ impl PartialOrd for Deck {
 impl Deck {
     // TODO: Remove clones
     pub fn get_deck_cards(&self) -> Vec<Card> {
-        let deck_code = self.export.clone();
+        let deck_code = self.deck_code.clone();
         let cards = deck_from_code(&deck_code).unwrap();
         let cards = cards.cards();
 
