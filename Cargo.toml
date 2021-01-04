@@ -8,6 +8,8 @@ version = "0.1.0"
 
 [dependencies]
 chrono = {version = "0.4.19", features = ["serde"]}
+diesel = {version = "1.4", features = ["sqlite", "numeric", "chrono"]}
+dotenv = "0.15"
 futures-util = "*"
 hyper = {version = "0.14", features = ["client", "http2"]}
 hyper-rustls = "0.22"

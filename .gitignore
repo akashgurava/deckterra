@@ -1,5 +1,5 @@
 /target
 *.db
 *.db3
-*.sql*
+*.sqlite
 *.json

@@ -1,9 +1,13 @@
 use std::{cmp::Ordering, collections::HashMap};
 
-use chrono::{serde::ts_milliseconds, DateTime, Utc};
+use chrono::{serde::ts_milliseconds, DateTime, NaiveDateTime, TimeZone, Utc};
+use diesel::deserialize::Queryable;
 use lordeckcodes::encoder::deck_from_code;
 
+use super::schema::decks;
 use crate::utils::chain_ordering;
+
+type DB = diesel::sqlite::Sqlite;
 
 lazy_static! {
     static ref INT_TO_FACTION: HashMap<u32, &'static str> = {
@@ -64,6 +68,45 @@ impl PartialOrd for Deck {
     }
 }
 
+impl Queryable<decks::SqlType, DB> for Deck {
+    type Row = (
+        i32,
+        String,
+        String,
+        String,
+        String,
+        i32,
+        String,
+        String,
+        NaiveDateTime,
+        NaiveDateTime,
+        bool,
+        bool,
+        bool,
+    );
+
+    fn build(row: Self::Row) -> Self {
+        fn change(dt: NaiveDateTime) -> DateTime<Utc> {
+            Utc.from_utc_datetime(&dt)
+        }
+
+        Deck {
+            uid: row.1,
+            deck_code: row.2,
+            title: row.3,
+            description: row.4,
+            rating: row.5,
+            mode: row.6,
+            playstyle: row.7,
+            created_at: change(row.8),
+            changed_at: change(row.9),
+            is_private: row.10,
+            is_draft: row.11,
+            is_riot: row.12,
+        }
+    }
+}
+
 impl Deck {
     // TODO: Remove clones
     pub fn get_deck_cards(&self) -> Vec<Card> {
@@ -106,32 +149,21 @@ pub struct Card {
     count: i32,
 }
 
-// impl Card {
-//     pub fn from_card_and_count(deck_code: Option<String>, card: &CardCodeAndCount) -> Self {
-//         let set = card.card().set();
-//         let faction = card.card().faction();
-//         let number = card.card().number();
-
-//         let str_faction = INT_TO_FACTION.get(&faction).unwrap();
-//         let code = format!("{:0>2}{}{:0>3}", set, str_faction, number);
-//         Card {
-//             deck_code,
-//             code,
-//             set,
-//             faction,
-//             number,
-//             count: card.count(),
-//         }
-//     }
-//     pub fn multiple_from_card_and_count(
-//         deck_code: Option<String>,
-//         cards: &Vec<CardCodeAndCount>,
-//     ) -> Vec<Self> {
-//         cards
-//             .iter()
-//             .map(|card| Card::from_card_and_count(deck_code.clone(), card))
-//             .collect()
-//     }
+// #[derive(Insertable)]
+// #[table_name = "decks"]
+// pub struct NewDeck<'a> {
+//     pub uid: &'a str,
+//     pub deck_code: &'a str,
+//     pub title: &'a str,
+//     pub description: &'a str,
+//     pub rating: i32,
+//     pub mode: &'a str,
+//     pub playstyle: &'a str,
+//     pub created_at: NaiveDateTime,
+//     pub changed_at: NaiveDateTime,
+//     pub is_private: bool,
+//     pub is_draft: bool,
+//     pub is_riot: bool,
 // }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
