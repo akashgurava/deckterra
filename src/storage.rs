@@ -4,7 +4,7 @@ use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use dotenv::dotenv;
 
-use crate::models::Deck;
+use crate::data::models::Deck;
 
 pub fn establish_connection() -> SqliteConnection {
     dotenv().ok();
@@ -15,7 +15,7 @@ pub fn establish_connection() -> SqliteConnection {
 }
 
 pub fn read() {
-    use crate::schema::decks::dsl::*;
+    use crate::data::schema::decks::dsl::*;
 
     let connection = establish_connection();
     let results: Vec<Deck> = decks

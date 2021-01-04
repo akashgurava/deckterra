@@ -3,7 +3,7 @@ use log::info;
 use serde_qs;
 
 use crate::{
-    models::{Deck, DeckData},
+    data::models::{Deck, DeckData},
     utils::{fetch_multiple, write_file},
 };
 

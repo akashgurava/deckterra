@@ -7,9 +7,8 @@ extern crate diesel;
 
 extern crate pretty_env_logger;
 
+mod data;
 mod moba;
-mod models;
-mod schema;
 mod storage;
 mod utils;
 
