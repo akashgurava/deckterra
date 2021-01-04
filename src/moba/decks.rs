@@ -3,7 +3,10 @@ use log::info;
 use serde_qs;
 
 use crate::{
-    data::models::{Deck, DeckData},
+    data::{
+        cards::Card,
+        decks::{Deck, DeckData},
+    },
     utils::{fetch_multiple, write_file},
 };
 
@@ -170,7 +173,7 @@ pub async fn save_decks(
 
     let cards = decks
         .iter()
-        .map(|deck| deck.get_deck_cards())
+        .map(|deck| Card::from_deck(deck))
         .flatten()
         .collect::<Vec<_>>();
     write_file("cards.json", &cards);

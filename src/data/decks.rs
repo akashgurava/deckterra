@@ -1,28 +1,12 @@
-use std::{cmp::Ordering, collections::HashMap};
+use std::cmp::Ordering;
 
 use chrono::{serde::ts_milliseconds, DateTime, NaiveDateTime, TimeZone, Utc};
 use diesel::deserialize::Queryable;
-use lordeckcodes::encoder::deck_from_code;
 
 use super::schema::decks;
 use crate::utils::chain_ordering;
 
 type DB = diesel::sqlite::Sqlite;
-
-lazy_static! {
-    static ref INT_TO_FACTION: HashMap<u32, &'static str> = {
-        let mut map = HashMap::new();
-        map.insert(0, "DE");
-        map.insert(1, "FR");
-        map.insert(2, "IO");
-        map.insert(3, "NX");
-        map.insert(4, "PZ");
-        map.insert(5, "SI");
-        map.insert(6, "BW");
-        map.insert(9, "MT");
-        map
-    };
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -108,67 +92,14 @@ impl Queryable<decks::SqlType, DB> for Deck {
 }
 
 impl Deck {
-    // TODO: Remove clones
-    pub fn get_deck_cards(&self) -> Vec<Card> {
-        let deck_code = self.deck_code.clone();
-        let cards = deck_from_code(&deck_code).unwrap();
-        let cards = cards.cards();
-
-        cards
-            .into_iter()
-            .map(|card| {
-                let set = card.card().set();
-                let faction = card.card().faction();
-                let number = card.card().number();
-
-                let str_faction = INT_TO_FACTION.get(&faction).unwrap();
-                let code = format!("{:0>2}{}{:0>3}", set, str_faction, number);
-                Card {
-                    deck_code: deck_code.clone(),
-                    code,
-                    set,
-                    faction,
-                    number,
-                    count: card.count(),
-                }
-            })
-            .collect::<Vec<_>>()
-
-        // Card::multiple_from_card_and_count(Some(self.export.clone()), cards.cards())
+    pub fn deck_code(&self) -> String {
+        self.deck_code.clone()
     }
 }
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct Card {
-    deck_code: String,
-    code: String,
-    set: u32,
-    faction: u32,
-    number: u32,
-    count: i32,
-}
-
-// #[derive(Insertable)]
-// #[table_name = "decks"]
-// pub struct NewDeck<'a> {
-//     pub uid: &'a str,
-//     pub deck_code: &'a str,
-//     pub title: &'a str,
-//     pub description: &'a str,
-//     pub rating: i32,
-//     pub mode: &'a str,
-//     pub playstyle: &'a str,
-//     pub created_at: NaiveDateTime,
-//     pub changed_at: NaiveDateTime,
-//     pub is_private: bool,
-//     pub is_draft: bool,
-//     pub is_riot: bool,
-// }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeckData {
     has_next: bool,
-    pub decks: Vec<Deck>,
+    pub(crate) decks: Vec<Deck>,
 }

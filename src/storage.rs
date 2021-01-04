@@ -4,7 +4,7 @@ use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use dotenv::dotenv;
 
-use crate::data::models::Deck;
+use crate::data::decks::Deck;
 
 pub fn establish_connection() -> SqliteConnection {
     dotenv().ok();
