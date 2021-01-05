@@ -1,15 +1,19 @@
 #[macro_use]
 extern crate serde;
+#[macro_use]
+extern crate lazy_static;
+#[macro_use]
+extern crate anyhow;
 
-mod decks;
-mod models;
+extern crate pretty_env_logger;
+
+mod data;
+mod moba;
 mod utils;
 
-use std::time::Instant;
-
-use decks::get_decks;
 use log::info;
-use reqwest::Client;
+use moba::decks::save_decks;
+use tokio::time::Instant;
 
 #[tokio::main]
 async fn main() {
@@ -17,7 +21,8 @@ async fn main() {
     let app_start = Instant::now();
 
     info!("App Started!");
-    let client = Client::new();
-    get_decks(&client, None, Some(20000), None).await;
+
+    save_decks(Some(10), None, None).await;
+
     info!("App completed in {} secs", app_start.elapsed().as_secs());
 }
