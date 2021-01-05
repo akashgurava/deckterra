@@ -8,13 +8,13 @@ use crate::{
 };
 
 // Constants
-const MAX_DECKS: u32 = 125_000;
+const MAX_DECKS: u32 = 100_000;
 
 const ENDPOINT_HOME: &str = "https://lor.mobalytics.gg/api/v2/";
 const ENDPOINT_DECKS_LIBRARY: &str = "decks/library";
 
 const DEFAULT_DECK_FETCH_COUNT: u32 = 5000;
-const DECK_DIV_COUNT: u32 = 4000;
+const DECK_DIV_COUNT: u32 = 5000;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "UPPERCASE")]
@@ -53,6 +53,17 @@ pub struct DeckUri {
     category: Option<DeckCategory>,
 }
 
+impl Default for DeckUri {
+    fn default() -> Self {
+        DeckUri {
+            sort_by: Some(DeckSort::default()),
+            from: Some(0),
+            count: DEFAULT_DECK_FETCH_COUNT,
+            category: Some(DeckCategory::default()),
+        }
+    }
+}
+
 impl DeckUri {
     #[allow(dead_code)]
     fn new(count: Option<u32>) -> Self {
@@ -74,17 +85,6 @@ impl DeckUri {
             from,
             count: count.unwrap_or_else(|| DEFAULT_DECK_FETCH_COUNT),
             category,
-        }
-    }
-}
-
-impl Default for DeckUri {
-    fn default() -> Self {
-        DeckUri {
-            sort_by: None,
-            from: None,
-            count: 100,
-            category: None,
         }
     }
 }

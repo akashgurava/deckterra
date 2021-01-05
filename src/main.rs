@@ -2,6 +2,8 @@
 extern crate serde;
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate anyhow;
 
 extern crate pretty_env_logger;
 
@@ -20,7 +22,7 @@ async fn main() {
 
     info!("App Started!");
 
-    save_decks(Some(200), None, None).await;
+    save_decks(None, None, None).await;
 
     info!("App completed in {} secs", app_start.elapsed().as_secs());
 }

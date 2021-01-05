@@ -1,5 +1,6 @@
-use std::{cmp::Ordering, fs::OpenOptions, io::BufWriter, time::Duration};
+use std::{cmp::Ordering, fs::OpenOptions, io::BufWriter, str::from_utf8, time::Duration};
 
+use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use hyper::{client::HttpConnector, Body, Client, Request, Uri};
 use hyper_rustls::HttpsConnector;
@@ -27,89 +28,71 @@ pub fn chain_ordering(o1: Ordering, o2: Ordering) -> Ordering {
     }
 }
 
-pub async fn fetch<T: DeserializeOwned>(uri: Uri, identifier: usize) -> Option<T> {
-    trace!("{}th request - Start.", identifier);
-    let start = Instant::now();
+pub async fn fetch<T: DeserializeOwned>(uri: Uri) -> Result<T> {
+    let request = Request::builder()
+        .uri(uri.clone())
+        .body(Body::empty())
+        .context("Building request failed")?;
+    let response = CLIENT
+        .request(request)
+        .await
+        .context("Sending Request Failed")?;
+    let status = response.status();
+    let body = hyper::body::to_bytes(response)
+        .await
+        .context("Parsing response failed")?;
+    let data = if status.is_success() {
+        serde_json::from_slice::<T>(&body).context("Deserialize to required struct failed")?
+    } else {
+        let error = from_utf8(&body).context("Deserialize to error struct failed")?;
+        return Err(anyhow!("Error response - {}", error));
+    };
 
-    let mut num_try: u8 = 1;
-    while num_try < 4 {
-        // Building a request should not be any issue
-        let request = Request::builder()
-            .uri(uri.clone())
-            .body(Body::empty())
-            .unwrap();
-        let response = CLIENT.request(request).await;
-        trace!(
-            "{}th request - {}th try - Recieved response: {}",
-            identifier,
-            num_try,
-            start.elapsed().as_secs()
-        );
-        // TODO: do more error handling
-        if response.is_ok() {
-            let body = hyper::body::to_bytes(response.unwrap()).await;
-            if body.is_ok() {
-                let data: Result<T, _> = serde_json::from_slice(&body.unwrap());
-                if data.is_ok() {
-                    info!(
-                        "{}th request - {}th try - Completed in {} secs",
-                        identifier,
-                        num_try,
-                        start.elapsed().as_secs()
-                    );
-                    return Some(data.unwrap());
-                } else {
-                    let err = data.err().unwrap();
-                    warn!(
-                        "{}th request - {}th try - Convert to struct failed: {}",
-                        identifier,
-                        num_try,
-                        err.to_string()
-                    );
-                }
-            } else {
-                let err = body.err().unwrap();
-                warn!(
-                    "{}th request - {}th try - Parsing response failed: {}",
-                    identifier,
-                    num_try,
-                    err.to_string()
-                );
-            }
-        } else {
-            let err = response.err().unwrap();
-            warn!(
-                "{}th request - {}th try - Sending Request Failed: {}",
-                identifier,
-                num_try,
-                err.to_string()
-            );
-        }
-        sleep(Duration::from_millis(1500)).await;
-        num_try += 1;
-    }
-    error!(
-        "{}th request - Failed - Uri: {}",
-        identifier,
-        uri.to_string()
-    );
-    None
+    Ok(data)
 }
 
 pub async fn fetch_multiple<T: DeserializeOwned>(uris: Vec<Uri>) -> Vec<Option<T>> {
     let uris = stream::iter(uris);
-    let dur = Duration::from_millis(250); // 1 request per 250ms
-    let max_concurrent_req = 6usize;
+    let dur = Duration::from_millis(1500); // 1 request per 250ms
+    let max_concurrent_req = 6;
+    let retries = 3;
 
     let data = stream::StreamExt::throttle(uris, dur)
         .enumerate()
         .map(|(mut i, uri)| async move {
             i += 1;
-            if i > max_concurrent_req {
-                trace!("{}th request - Sleeping for 8 secs", i);
-                sleep(Duration::from_secs(8)).await;
+            let start = Instant::now();
+            let mut data: Option<T> = None;
+
+            for num_try in 1..=retries {
+                if i > max_concurrent_req {
+                    trace!("{}th request - Sleeping for 8 secs", i);
+                    sleep(Duration::from_secs(8)).await;
+                }
+                match fetch::<T>(uri.clone()).await {
+                    Ok(resp_data) => {
+                        info!("{}th request - {}th try - Completed.", i, num_try,);
+                        data.replace(resp_data);
+                        break;
+                    }
+                    Err(err) => {
+                        println!("{}", start.elapsed().as_secs());
+                        if num_try == retries {
+                            error!(
+                                "{}th request - {}th try - {} - {}",
+                                i,
+                                num_try,
+                                err.to_string(),
+                                uri.to_string()
+                            );
+                        } else {
+                            warn!("{}th request - {}th try - {}", i, num_try, err.to_string(),);
+                            sleep(Duration::from_secs(2 * num_try)).await;
+                        };
+                    }
+                }
             }
-            fetch::<T>(uri, i).await
+            data
         })
         // Send max of 5 requests at a time
         .buffered(max_concurrent_req)
