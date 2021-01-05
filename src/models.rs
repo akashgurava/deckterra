@@ -138,5 +138,12 @@ pub struct Card {
 #[serde(rename_all = "camelCase")]
 pub struct DeckData {
     has_next: bool,
-    pub decks: Vec<Deck>,
+    decks: Vec<Deck>,
+}
+
+impl DeckData {
+    /// Consumes self and return decks
+    pub fn decks(self) -> Vec<Deck> {
+        self.decks
+    }
 }

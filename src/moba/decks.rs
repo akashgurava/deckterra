@@ -14,7 +14,6 @@ const ENDPOINT_HOME: &str = "https://lor.mobalytics.gg/api/v2/";
 const ENDPOINT_DECKS_LIBRARY: &str = "decks/library";
 
 const DEFAULT_DECK_FETCH_COUNT: u32 = 5000;
-const DECK_DIV_COUNT: u32 = 5000;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "UPPERCASE")]
@@ -109,9 +108,8 @@ pub async fn get_decks(
     sort_by: Option<DeckSort>,
     category: Option<DeckCategory>,
 ) -> Vec<Deck> {
-    // We request 20% more decks
-    let total_decks = ((total_decks.unwrap_or_else(|| MAX_DECKS)) as f64 * 1.2).ceil() as u32;
-    let num_requests = (total_decks as f64 / DECK_DIV_COUNT as f64).ceil() as u32;
+    let total_decks = total_decks.unwrap_or_else(|| MAX_DECKS);
+    let num_requests = (total_decks as f64 / DEFAULT_DECK_FETCH_COUNT as f64).ceil() as u32;
 
     let category = Some(category.unwrap_or_default());
     let sort_by = Some(sort_by.unwrap_or_default());
@@ -121,7 +119,7 @@ pub async fn get_decks(
             let count = if i < num_requests - 1 {
                 DEFAULT_DECK_FETCH_COUNT
             } else {
-                let rem = total_decks % DECK_DIV_COUNT;
+                let rem = total_decks % DEFAULT_DECK_FETCH_COUNT;
                 if rem == 0 {
                     DEFAULT_DECK_FETCH_COUNT
                 } else {
@@ -130,7 +128,7 @@ pub async fn get_decks(
             };
             Uri::from(DeckUri::create(
                 sort_by,
-                Some(i * DECK_DIV_COUNT),
+                Some(i * DEFAULT_DECK_FETCH_COUNT),
                 Some(count),
                 category,
             ))
@@ -145,8 +143,8 @@ pub async fn get_decks(
         let mut data = fetch_multiple::<DeckData>(request_uris)
             .await
             .into_iter()
-            .map(|x: Option<DeckData>| x.unwrap_or_default())
-            .map(|x| x.decks)
+            .map(|x| x.unwrap_or_default())
+            .map(|x| x.decks())
             .flatten()
             .collect::<Vec<_>>();
 
@@ -154,7 +152,6 @@ pub async fn get_decks(
         data.dedup();
         data
     };
-    // dbg!(data);
     info!("Recieved {} decks.", data.len());
     data
 }
