@@ -112,6 +112,14 @@ pub async fn get_decks(
     category: Option<DeckCategory>,
 ) -> Vec<Deck> {
     let total_decks = total_decks.unwrap_or_else(|| MAX_DECKS);
+
+    // We request ma20% more decks or 5000
+    let extra_decks = (total_decks as f64 * 0.2).ceil() as u32;
+    let total_decks = if extra_decks > DEFAULT_DECK_FETCH_COUNT {
+        total_decks + DEFAULT_DECK_FETCH_COUNT
+    } else {
+        total_decks + extra_decks
+    };
     let num_requests = (total_decks as f64 / DEFAULT_DECK_FETCH_COUNT as f64).ceil() as u32;
 
     let category = Some(category.unwrap_or_default());
