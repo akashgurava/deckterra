@@ -1,12 +1,8 @@
 use std::cmp::Ordering;
 
-use chrono::{serde::ts_milliseconds, DateTime, NaiveDateTime, TimeZone, Utc};
-use diesel::deserialize::Queryable;
+use chrono::{serde::ts_milliseconds, DateTime, Utc};
 
-use super::schema::decks;
 use crate::utils::chain_ordering;
-
-type DB = diesel::sqlite::Sqlite;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -49,45 +45,6 @@ impl Ord for Deck {
 impl PartialOrd for Deck {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
-    }
-}
-
-impl Queryable<decks::SqlType, DB> for Deck {
-    type Row = (
-        i32,
-        String,
-        String,
-        String,
-        String,
-        i32,
-        String,
-        String,
-        NaiveDateTime,
-        NaiveDateTime,
-        bool,
-        bool,
-        bool,
-    );
-
-    fn build(row: Self::Row) -> Self {
-        fn change(dt: NaiveDateTime) -> DateTime<Utc> {
-            Utc.from_utc_datetime(&dt)
-        }
-
-        Deck {
-            uid: row.1,
-            deck_code: row.2,
-            title: row.3,
-            description: row.4,
-            rating: row.5,
-            mode: row.6,
-            playstyle: row.7,
-            created_at: change(row.8),
-            changed_at: change(row.9),
-            is_private: row.10,
-            is_draft: row.11,
-            is_riot: row.12,
-        }
     }
 }
 
