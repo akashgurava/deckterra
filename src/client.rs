@@ -1,5 +1,10 @@
-use serde::Serialize;
-use tokio::time::Duration;
+use std::str::from_utf8;
+
+use anyhow::{Context, Result};
+use log::info;
+use reqwest::{Client as ReqClient, Method as ReqMethod};
+use serde::{de::DeserializeOwned, Serialize};
+use tokio::time::{sleep, Duration, Instant};
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Method {
@@ -12,113 +17,164 @@ impl Default for Method {
     }
 }
 
-impl From<Method> for reqwest::Method {
+impl From<Method> for ReqMethod {
     fn from(method: Method) -> Self {
         match method {
-            Method::Get => reqwest::Method::GET,
+            Method::Get => ReqMethod::GET,
             // _ => reqwest::Method::GET,
         }
     }
 }
 
 pub struct Client {
-    client: reqwest::Client,
+    client: ReqClient,
     retries: u8,
     throttle: Duration,
     concurrency: u32,
+    error_backoff: Vec<Duration>,
 }
 
 impl Default for Client {
     fn default() -> Self {
         Client {
-            client: reqwest::Client::new(),
-            retries: 3,
+            client: ReqClient::new(),
+            retries: 5,
             throttle: Duration::from_millis(1500),
             concurrency: 5,
+            error_backoff: vec![
+                Duration::from_millis(1200),
+                Duration::from_millis(3000),
+                Duration::from_millis(6000),
+                Duration::from_millis(9000),
+            ],
         }
     }
 }
 
 impl Client {
-    pub async fn fetch<Q>(&self, method: Method, url: String, query: Option<Q>)
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    async fn try_fetch<Q, T>(&self, method: Method, url: String, query: Option<Q>) -> Result<T>
     where
         Q: Serialize,
-        //     T: DeserializeOwned,
+        T: DeserializeOwned,
     {
-        // // Prepare request
-        // let mut url = Url::parse(&url).context(format!("Unable to parse url - {}", url))?;
-        // match query {
-        //     Some(query) => {
-        //         let query =
-        //             &to_string(query).context(format!("Unable to parse query - {:?}", query))?;
-        //         url.set_query(Some(query));
-        //     }
-        //     None => {}
-        // }
-        // let response = CLIENT
-        //     .request(method.clone(), url)
-        //     .send()
-        //     .await
-        //     .context("Sending Request Failed")?;
-
-        // // Process response
-        // let status = response.status();
-        // let body = response.bytes().await.context("Parsing response failed")?;
-        // let data = if status.is_success() {
-        //     serde_json::from_slice::<T>(&body).context("Deserialize to required struct failed")?
-        // } else {
-        //     let error = from_utf8(&body).context("Deserialize to error struct failed")?;
-        //     return Err(anyhow!("Error response - {}", error));
-        // };
-
-        // Ok(data)
         let mut request = self.client.request(method.into(), &url);
         request = match query {
             Some(query) => request.query(&query),
             None => request,
         };
-        let _response = request.build();
-        match _response.err() {
-            None => {}
-            Some(error) => {
-                if error.is_builder() {
-                    println!("builder error")
+        let response = request.send().await?;
+        let status = response.status();
+        let body = response.bytes().await.context("Parsing response failed")?;
+        let data = if status.is_success() {
+            serde_json::from_slice::<T>(&body).context("Deserialize to required struct failed")?
+        } else {
+            let error = from_utf8(&body).context("Unable to parse response body as string")?;
+            return Err(anyhow!("Error response - {}", error));
+        };
+        Ok(data)
+    }
+
+    pub async fn fetch<Q, T>(&self, method: Method, url: String, query: Option<Q>) -> Option<T>
+    where
+        Q: Serialize + Clone,
+        T: DeserializeOwned,
+    {
+        let start = Instant::now();
+        for attempt in 1..=self.retries {
+            let response = self
+                .try_fetch::<Q, T>(method, url.clone(), query.clone())
+                .await;
+            match response {
+                Ok(data) => {
+                    info!(
+                        "{}th attempt > Success > Time elapsed {} secs",
+                        attempt,
+                        start.elapsed().as_secs()
+                    );
+                    return Some(data);
                 }
-                if error.is_connect() {
-                    println!("connect error")
+                Err(err) => {
+                    if attempt < self.retries {
+                        warn!(
+                            "{}th attempt failed > Reason - {}",
+                            attempt,
+                            err.to_string(),
+                        );
+                        let dur = self.error_backoff.get((attempt - 1) as usize).unwrap();
+                        sleep(dur.clone()).await;
+                    } else {
+                        error!(
+                            "{}th attempt failed > Reason - {}",
+                            attempt,
+                            err.to_string(),
+                        );
+                    }
                 }
-                if error.is_decode() {
-                    println!("decode error")
-                }
-                if error.is_redirect() {
-                    println!("redirect error")
-                }
-                if error.is_request() {
-                    println!("request error")
-                }
-                if error.is_status() {
-                    println!("status error")
-                }
-                if error.is_timeout() {
-                    println!("timeout error")
-                }
-                println!("{}", error.to_string())
             }
         }
+        None
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[derive(Serialize, Clone, Deserialize, PartialEq, Eq, Debug)]
+    struct TestHW {
+        msg: String,
+    }
 
     #[tokio::test]
-    async fn url_error() {
-        #[derive(Serialize)]
-        struct Y {}
-        let client = Client::default();
-        client
-            .fetch::<Y>(Method::Get, "https://googlr.com".into(), None)
+    async fn simple_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/hello"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(TestHW {
+                msg: "hello world".into(),
+            }))
+            // Mounting the mock on the mock server - it's now effective!
+            .mount(&server)
             .await;
+        let client = Client::new();
+
+        let data = client
+            .fetch::<TestHW, TestHW>(Method::Get, format!("{}/hello", &server.uri()), None)
+            .await;
+
+        assert_eq!(data.is_some(), true);
+        assert_eq!(
+            data.unwrap(),
+            TestHW {
+                msg: "hello world".into()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn simple_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/hello"))
+            .respond_with(ResponseTemplate::new(500).set_body_json(TestHW {
+                msg: "Error".into(),
+            }))
+            // Mounting the mock on the mock server - it's now effective!
+            .mount(&server)
+            .await;
+        let client = Client::new();
+
+        let data = client
+            .fetch::<TestHW, TestHW>(Method::Get, format!("{}/hello", &server.uri()), None)
+            .await;
+
+        assert_eq!(data.is_none(), true);
     }
 }
