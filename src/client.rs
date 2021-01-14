@@ -8,7 +8,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::{sleep, Duration, Instant};
 use tokio_stream as stream;
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Method {
     Get,
 }

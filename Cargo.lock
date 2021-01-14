@@ -221,6 +221,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-stream",
+ "typed-builder",
  "wiremock",
 ]
 
@@ -1496,6 +1497,17 @@ name = "try-lock"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
+
+[[package]]
+name = "typed-builder"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ec6661b8cd8dc76d17f15f1cf1da27fc3dd58850ccc220d04653b48e0fae3ba"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "unicode-bidi"

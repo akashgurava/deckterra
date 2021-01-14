@@ -6,6 +6,7 @@ extern crate anyhow;
 extern crate log;
 
 mod client;
+mod request;
 
 use client::{Client, Method};
 use serde::{Deserialize, Serialize};
