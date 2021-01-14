@@ -14,10 +14,18 @@ use serde::{Deserialize, Serialize};
 async fn main() {
     pretty_env_logger::init();
     let client = Client::new();
-    #[derive(Serialize, Clone, Deserialize, PartialEq, Eq, Debug)]
+    #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
     struct Struct {}
 
     client
         .fetch::<Struct, Struct>(Method::Get, "https://httpbin.org/status/200".into(), None)
+        .await;
+
+    client
+        .fetch_multiple::<Struct, Struct>(
+            Method::Get,
+            "https://httpbin.org/status/200".into(),
+            vec![None, None],
+        )
         .await;
 }

@@ -1,12 +1,14 @@
 use std::str::from_utf8;
 
 use anyhow::{Context, Result};
+use futures_util::StreamExt;
 use log::info;
 use reqwest::{Client as ReqClient, Method as ReqMethod};
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::{sleep, Duration, Instant};
+use tokio_stream as stream;
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq)]
 pub enum Method {
     Get,
 }
@@ -17,8 +19,8 @@ impl Default for Method {
     }
 }
 
-impl From<Method> for ReqMethod {
-    fn from(method: Method) -> Self {
+impl From<&Method> for ReqMethod {
+    fn from(method: &Method) -> Self {
         match method {
             Method::Get => ReqMethod::GET,
             // _ => reqwest::Method::GET,
@@ -28,9 +30,9 @@ impl From<Method> for ReqMethod {
 
 pub struct Client {
     client: ReqClient,
-    retries: u8,
+    max_tries: u8,
     throttle: Duration,
-    concurrency: u32,
+    concurrency: usize,
     error_backoff: Vec<Duration>,
 }
 
@@ -38,7 +40,7 @@ impl Default for Client {
     fn default() -> Self {
         Client {
             client: ReqClient::new(),
-            retries: 5,
+            max_tries: 5,
             throttle: Duration::from_millis(1500),
             concurrency: 5,
             error_backoff: vec![
@@ -56,14 +58,14 @@ impl Client {
         Self::default()
     }
 
-    async fn try_fetch<Q, T>(&self, method: Method, url: String, query: Option<Q>) -> Result<T>
+    async fn try_fetch<Q, T>(&self, method: &Method, url: &str, query: Option<&Q>) -> Result<T>
     where
         Q: Serialize,
         T: DeserializeOwned,
     {
-        let mut request = self.client.request(method.into(), &url);
+        let mut request = self.client.request(method.into(), url);
         request = match query {
-            Some(query) => request.query(&query),
+            Some(query) => request.query(query),
             None => request,
         };
         let response = request.send().await?;
@@ -80,14 +82,12 @@ impl Client {
 
     pub async fn fetch<Q, T>(&self, method: Method, url: String, query: Option<Q>) -> Option<T>
     where
-        Q: Serialize + Clone,
+        Q: Serialize,
         T: DeserializeOwned,
     {
         let start = Instant::now();
-        for attempt in 1..=self.retries {
-            let response = self
-                .try_fetch::<Q, T>(method, url.clone(), query.clone())
-                .await;
+        for attempt in 1..=self.max_tries {
+            let response = self.try_fetch::<Q, T>(&method, &url, query.as_ref()).await;
             match response {
                 Ok(data) => {
                     info!(
@@ -98,7 +98,7 @@ impl Client {
                     return Some(data);
                 }
                 Err(err) => {
-                    if attempt < self.retries {
+                    if attempt < self.max_tries {
                         warn!(
                             "{}th attempt failed > Reason - {}",
                             attempt,
@@ -118,6 +118,82 @@ impl Client {
         }
         None
     }
+
+    async fn fetch_single<Q, T>(
+        &self,
+        identifier: usize,
+        method: &Method,
+        url: &str,
+        query: Option<Q>,
+    ) -> Option<T>
+    where
+        Q: Serialize,
+        T: DeserializeOwned,
+    {
+        let start = Instant::now();
+        for attempt in 1..=self.max_tries {
+            let response = self.try_fetch::<Q, T>(&method, &url, query.as_ref()).await;
+            match response {
+                Ok(data) => {
+                    info!(
+                        "{}th request > {}th attempt > Success > Time elapsed {} secs",
+                        identifier,
+                        attempt,
+                        start.elapsed().as_secs()
+                    );
+                    return Some(data);
+                }
+                Err(err) => {
+                    if attempt < self.max_tries {
+                        warn!(
+                            "{}th request > {}th attempt failed > Reason - {}",
+                            identifier,
+                            attempt,
+                            err.to_string(),
+                        );
+                        let dur = self.error_backoff.get((attempt - 1) as usize).unwrap();
+                        sleep(dur.clone()).await;
+                    } else {
+                        error!(
+                            "{}th request > {}th attempt failed > Reason - {}",
+                            identifier,
+                            attempt,
+                            err.to_string(),
+                        );
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub async fn fetch_multiple<Q, T>(
+        &self,
+        method: Method,
+        url: String,
+        queries: Vec<Option<Q>>,
+    ) -> Vec<Option<T>>
+    where
+        Q: Serialize,
+        T: DeserializeOwned,
+    {
+        let method = &method;
+        let url = &url;
+        let queries = stream::iter(queries);
+        let data = stream::StreamExt::throttle(queries, self.throttle)
+            .enumerate()
+            .map(|(mut i, query)| async move {
+                i += 1;
+                self.fetch_single::<_, T>(i, method, url, query).await
+            })
+            .buffered(self.concurrency)
+            .collect::<Vec<_>>()
+            .await;
+
+        // for identifier in 1..=queries.len() {}
+        data
+        // vec![]
+    }
 }
 
 #[cfg(test)]
@@ -127,7 +203,7 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    #[derive(Serialize, Clone, Deserialize, PartialEq, Eq, Debug)]
+    #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
     struct TestHW {
         msg: String,
     }
