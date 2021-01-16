@@ -8,6 +8,8 @@ use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::{sleep, Duration, Instant};
 use tokio_stream as stream;
 
+use crate::request::Request;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Method {
     Get,
@@ -80,14 +82,18 @@ impl Client {
         Ok(data)
     }
 
-    pub async fn fetch<Q, T>(&self, method: Method, url: String, query: Option<Q>) -> Option<T>
+    pub async fn fetch<Q, T>(&self, request: Request<'_, Q>) -> Option<T>
     where
         Q: Serialize,
         T: DeserializeOwned,
     {
+        let method = request.method();
+        let url = request.url();
+        let query = request.query();
+
         let start = Instant::now();
         for attempt in 1..=self.max_tries {
-            let response = self.try_fetch::<Q, T>(&method, &url, query.as_ref()).await;
+            let response = self.try_fetch::<Q, T>(method, url, query).await;
             match response {
                 Ok(data) => {
                     info!(
@@ -124,7 +130,7 @@ impl Client {
         identifier: usize,
         method: &Method,
         url: &str,
-        query: Option<Q>,
+        query: Option<&Q>,
     ) -> Option<T>
     where
         Q: Serialize,
@@ -132,7 +138,7 @@ impl Client {
     {
         let start = Instant::now();
         for attempt in 1..=self.max_tries {
-            let response = self.try_fetch::<Q, T>(&method, &url, query.as_ref()).await;
+            let response = self.try_fetch::<Q, T>(method, url, query).await;
             match response {
                 Ok(data) => {
                     info!(
@@ -167,32 +173,28 @@ impl Client {
         None
     }
 
-    pub async fn fetch_multiple<Q, T>(
-        &self,
-        method: Method,
-        url: String,
-        queries: Vec<Option<Q>>,
-    ) -> Vec<Option<T>>
+    pub async fn fetch_multiple<Q, T>(&self, requests: Vec<Request<'_, Q>>) -> Vec<Option<T>>
     where
         Q: Serialize,
         T: DeserializeOwned,
     {
-        let method = &method;
-        let url = &url;
-        let queries = stream::iter(queries);
-        let data = stream::StreamExt::throttle(queries, self.throttle)
+        let requests = stream::iter(requests);
+        let data = stream::StreamExt::throttle(requests, self.throttle)
             .enumerate()
-            .map(|(mut i, query)| async move {
-                i += 1;
-                self.fetch_single::<_, T>(i, method, url, query).await
+            .map(|(mut identifier, request)| async move {
+                identifier += 1;
+                let method = request.method();
+                let url = request.url();
+                let query = request.query();
+
+                self.fetch_single::<_, T>(identifier, method, url, query)
+                    .await
             })
             .buffered(self.concurrency)
             .collect::<Vec<_>>()
             .await;
 
-        // for identifier in 1..=queries.len() {}
         data
-        // vec![]
     }
 }
 
@@ -220,10 +222,10 @@ mod tests {
             .mount(&server)
             .await;
         let client = Client::new();
+        let uri = format!("{}/hello", &server.uri());
+        let request = Request::<TestHW>::new(&Method::Get, &uri, None);
 
-        let data = client
-            .fetch::<TestHW, TestHW>(Method::Get, format!("{}/hello", &server.uri()), None)
-            .await;
+        let data = client.fetch::<TestHW, TestHW>(request).await;
 
         assert_eq!(data.is_some(), true);
         assert_eq!(
@@ -246,10 +248,10 @@ mod tests {
             .mount(&server)
             .await;
         let client = Client::new();
+        let uri = format!("{}/hello", &server.uri());
+        let request = Request::<TestHW>::new(&Method::Get, &uri, None);
 
-        let data = client
-            .fetch::<TestHW, TestHW>(Method::Get, format!("{}/hello", &server.uri()), None)
-            .await;
+        let data = client.fetch::<TestHW, TestHW>(request).await;
 
         assert_eq!(data.is_none(), true);
     }

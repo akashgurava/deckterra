@@ -3,8 +3,8 @@ use typed_builder::TypedBuilder;
 
 use crate::client::Method;
 
-#[derive(Debug, Clone, Copy, TypedBuilder)]
-struct Request<'a, Q>
+#[derive(Debug, TypedBuilder)]
+pub struct Request<'a, Q>
 where
     Q: Serialize,
 {
@@ -17,8 +17,20 @@ impl<'a, Q> Request<'a, Q>
 where
     Q: Serialize,
 {
-    fn new(method: &'a Method, url: &'a str, query: Option<&'a Q>) -> Self {
+    pub fn new(method: &'a Method, url: &'a str, query: Option<&'a Q>) -> Self {
         Request { method, url, query }
+    }
+
+    pub fn method(&self) -> &Method {
+        self.method
+    }
+
+    pub fn url(&self) -> &str {
+        self.url
+    }
+
+    pub fn query(&self) -> Option<&Q> {
+        self.query
     }
 }
 
@@ -26,7 +38,7 @@ where
 mod tests {
     use super::*;
 
-    #[derive(Serialize, Debug)]
+    #[derive(Serialize, Debug, Clone, Copy)]
     struct TestReq {
         start: u32,
         count: u32,
